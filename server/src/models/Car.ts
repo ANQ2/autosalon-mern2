@@ -1,11 +1,14 @@
 import mongoose, { Schema } from "mongoose";
 
 export const CarStatus = ["AVAILABLE", "RESERVED", "SOLD"] as const;
+export const DriveTypes = ["FWD", "RWD", "AWD"] as const;
+export const TransmissionTypes = ["AT", "MT", "CVT"] as const;
 
 const carSchema = new Schema(
     {
         title: { type: String, required: true, trim: true, minlength: 2, maxlength: 120 },
         brand: { type: String, required: true, trim: true, maxlength: 50 },
+        drive: { type: String, enum: DriveTypes, required: true },
         model: { type: String, required: true, trim: true, maxlength: 50 },
         year: { type: Number, required: true, min: 1950, max: 2100 },
         price: { type: Number, required: true, min: 0 },

@@ -20,7 +20,6 @@ export const chatService = {
 
         // чтобы не плодить: один чат на customer+car
         const exists = await ChatModel.findOne({
-            type: "CAR",
             customerId,
             carId,
             isDeleted: false
@@ -28,24 +27,26 @@ export const chatService = {
         if (exists) return exists;
 
         return ChatModel.create({
-            type: "CAR",
             status: "OPEN",
             customerId,
             carId,
-            lastMessageAt: null
+            lastMessageAt: new Date() // ← ВАЖНО: устанавливаем сразу!
         });
     },
 
     async createSupportChat(customerId: string) {
-        // один support чат на клиента
-        const exists = await ChatModel.findOne({ type: "SUPPORT", customerId, isDeleted: false });
+        // один support чат на клиента (без carId)
+        const exists = await ChatModel.findOne({
+            customerId,
+            carId: { $exists: false },
+            isDeleted: false
+        });
         if (exists) return exists;
 
         return ChatModel.create({
-            type: "SUPPORT",
             status: "OPEN",
             customerId,
-            lastMessageAt: null
+            lastMessageAt: new Date()
         });
     },
 
@@ -89,7 +90,8 @@ export const chatService = {
         const msg = await MessageModel.create({
             chatId: data.chatId,
             authorId: data.authorId,
-            text: data.text
+            text: data.text,
+            kind: "TEXT"
         });
 
         (chat as any).lastMessageAt = new Date();

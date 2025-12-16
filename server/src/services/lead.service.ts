@@ -1,17 +1,27 @@
 import { z } from "zod";
 import { LeadModel } from "../models/Lead";
-import { CarModel } from "../models/Car";
 import { UserModel } from "../models/User";
+import { CarModel } from "../models/Car";
 import { gqlError } from "../utils/errors";
 import { parseOrThrow } from "../utils/zod";
 import { pubsub, TOPICS } from "../graphql/pubsub";
 
 const createLeadSchema = z.object({
-    type: z.enum(["TEST_DRIVE", "RESERVE"]),
-    carId: z.string().min(10),
-    customerId: z.string().min(10),
-    preferredDate: z.coerce.date().optional(),
-    comment: z.string().max(500).optional()
+    carId: z.string().min(1),
+    customerId: z.string().min(1),
+
+    type: z.enum(["TEST_DRIVE", "RESERVE", "QUESTION"]),
+
+    message: z.string().max(2000).optional().nullable(),
+    // Принимаем либо Date объект, либо ISO string, либо null/undefined
+    preferredDate: z
+        .union([
+            z.date(),
+            z.string().datetime(), // ISO 8601 string
+        ])
+        .transform((val) => (typeof val === "string" ? new Date(val) : val))
+        .optional()
+        .nullable(),
 });
 
 export const leadService = {
@@ -29,8 +39,8 @@ export const leadService = {
             status: "NEW",
             customerId: data.customerId,
             carId: data.carId,
-            preferredDate: data.preferredDate,
-            comment: data.comment
+            preferredDate: data.preferredDate ?? null,
+            message: data.message ?? null,
         });
 
         pubsub.publish(TOPICS.LEAD_UPDATED, { leadUpdated: lead });
@@ -42,7 +52,11 @@ export const leadService = {
         const lead = await LeadModel.findOne({ _id: leadId, isDeleted: false });
         if (!lead) throw gqlError("NOT_FOUND", "Lead not found");
 
-        const manager = await UserModel.findOne({ _id: managerId, isDeleted: false, role: { $in: ["MANAGER", "ADMIN"] } });
+        const manager = await UserModel.findOne({
+            _id: managerId,
+            isDeleted: false,
+            role: { $in: ["MANAGER", "ADMIN"] },
+        });
         if (!manager) throw gqlError("NOT_FOUND", "Manager not found");
 
         (lead as any).assignedManagerId = managerId;
@@ -54,7 +68,7 @@ export const leadService = {
         return lead;
     },
 
-    async updateStatus(leadId: string, status: string) {
+    async updateStatus(leadId: string, status: "NEW" | "IN_PROGRESS" | "APPROVED" | "REJECTED") {
         const lead = await LeadModel.findOne({ _id: leadId, isDeleted: false });
         if (!lead) throw gqlError("NOT_FOUND", "Lead not found");
 
@@ -64,5 +78,5 @@ export const leadService = {
         pubsub.publish(TOPICS.LEAD_UPDATED, { leadUpdated: lead });
 
         return lead;
-    }
+    },
 };

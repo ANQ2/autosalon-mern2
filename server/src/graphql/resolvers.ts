@@ -1,3 +1,4 @@
+import { GraphQLScalarType, Kind } from "graphql";
 import { UserModel } from "../models/User";
 import { CarModel } from "../models/Car";
 import { LeadModel } from "../models/Lead";
@@ -16,11 +17,35 @@ import { assertAuth, assertRole, gqlError } from "../utils/errors";
 import type { GqlContext } from "./context";
 import { pubsub, TOPICS, withFilter } from "./pubsub";
 
-export const resolvers = {
-    DateTime: {
-        __parseValue(value: string) { return new Date(value); },
-        __serialize(value: Date) { return value.toISOString(); }
+// DateTime scalar resolver
+const dateTimeScalar = new GraphQLScalarType({
+    name: "DateTime",
+    description: "DateTime custom scalar type",
+    serialize(value: unknown) {
+        if (value instanceof Date) {
+            return value.toISOString();
+        }
+        if (typeof value === "string") {
+            return new Date(value).toISOString();
+        }
+        throw new Error("GraphQL DateTime Scalar serializer expected a Date or string");
     },
+    parseValue(value: unknown) {
+        if (typeof value === "string") {
+            return new Date(value);
+        }
+        throw new Error("GraphQL DateTime Scalar parser expected a string");
+    },
+    parseLiteral(ast) {
+        if (ast.kind === Kind.STRING) {
+            return new Date(ast.value);
+        }
+        return null;
+    },
+});
+
+export const resolvers = {
+    DateTime: dateTimeScalar,
 
     User: {
         id: (u: any) => u._id.toString(),
@@ -28,23 +53,27 @@ export const resolvers = {
             const ids = (u.favoriteCarIds ?? []).filter(Boolean);
             if (!ids.length) return [];
             return CarModel.find({ _id: { $in: ids }, isDeleted: false });
-        }
+        },
     },
 
-    Car: { id: (c: any) => c._id.toString() },
+    Car: {
+        id: (c: any) => c._id.toString(),
+        fuel: (c: any) => c.fuel ?? c.fuelType,
+        drive: (c: any) => c.drive ?? c.driveType,
+    },
 
     Lead: {
         id: (l: any) => l._id.toString(),
         customer: async (l: any) => UserModel.findOne({ _id: l.customerId, isDeleted: false }),
         car: async (l: any) => CarModel.findOne({ _id: l.carId, isDeleted: false }),
         assignedManager: async (l: any) =>
-            l.assignedManagerId ? UserModel.findOne({ _id: l.assignedManagerId, isDeleted: false }) : null
+            l.assignedManagerId ? UserModel.findOne({ _id: l.assignedManagerId, isDeleted: false }) : null,
     },
 
     Appointment: {
         id: (a: any) => a._id.toString(),
         lead: async (a: any) => LeadModel.findOne({ _id: a.leadId, isDeleted: false }),
-        manager: async (a: any) => UserModel.findOne({ _id: a.managerId, isDeleted: false })
+        manager: async (a: any) => UserModel.findOne({ _id: a.managerId, isDeleted: false }),
     },
 
     Promotion: { id: (p: any) => p._id.toString() },
@@ -56,13 +85,13 @@ export const resolvers = {
         manager: async (c: any) => (c.managerId ? UserModel.findOne({ _id: c.managerId, isDeleted: false }) : null),
         lastMessage: async (c: any) => {
             return MessageModel.findOne({ chatId: c._id, isDeleted: false }).sort({ createdAt: -1 });
-        }
+        },
     },
 
     Message: {
         id: (m: any) => m._id.toString(),
         chat: async (m: any) => ChatModel.findOne({ _id: m.chatId, isDeleted: false }),
-        author: async (m: any) => UserModel.findOne({ _id: m.authorId, isDeleted: false })
+        author: async (m: any) => UserModel.findOne({ _id: m.authorId, isDeleted: false }),
     },
 
     Query: {
@@ -75,8 +104,7 @@ export const resolvers = {
 
         car: async (_: unknown, { id }: { id: string }) => CarModel.findOne({ _id: id, isDeleted: false }),
 
-        compareCars: async (_: unknown, { ids }: { ids: string[] }) =>
-            CarModel.find({ _id: { $in: ids }, isDeleted: false }),
+        compareCars: async (_: unknown, { ids }: { ids: string[] }) => CarModel.find({ _id: { $in: ids }, isDeleted: false }),
 
         myFavorites: async (_: unknown, __: unknown, ctx: GqlContext) => {
             assertAuth(ctx.user);
@@ -106,21 +134,70 @@ export const resolvers = {
             return PromotionModel.find(q).sort({ createdAt: -1 });
         },
 
+        // ✨ ИСПРАВЛЕНО: myChats с логикой "первый ответивший берёт"
         myChats: async (_: unknown, __: unknown, ctx: GqlContext) => {
             assertAuth(ctx.user);
-            // клиент видит свои, менеджер — назначенные
-            if (ctx.user.role === "CUSTOMER") {
-                return ChatModel.find({ customerId: ctx.user.id, isDeleted: false }).sort({ lastMessageAt: -1, createdAt: -1 });
+
+            if (ctx.user.role === "CLIENT") {
+                // Клиент видит только свои чаты
+                return ChatModel.find({
+                    customerId: ctx.user.id,
+                    isDeleted: false
+                }).sort({ lastMessageAt: -1, createdAt: -1 });
             }
-            return ChatModel.find({ managerId: ctx.user.id, isDeleted: false }).sort({ lastMessageAt: -1, createdAt: -1 });
+
+            if (ctx.user.role === "MANAGER") {
+                // MANAGER видит:
+                // 1. Неназначенные чаты (managerId = null) — чтобы мог взять
+                // 2. Назначенные ему чаты (managerId = его ID)
+                return ChatModel.find({
+                    $or: [
+                        { managerId: null },           // неназначенные
+                        { managerId: ctx.user.id }     // назначенные ему
+                    ],
+                    isDeleted: false
+                }).sort({ lastMessageAt: -1, createdAt: -1 });
+            }
+
+            if (ctx.user.role === "ADMIN") {
+                // ADMIN видит ВСЕ чаты (и назначенные, и неназначенные)
+                return ChatModel.find({
+                    isDeleted: false
+                }).sort({ lastMessageAt: -1, createdAt: -1 });
+            }
+
+            return [];
         },
 
+        // ✨ ИСПРАВЛЕНО: crmChats с правильными фильтрами
         crmChats: async (_: unknown, args: any, ctx: GqlContext) => {
             assertAuth(ctx.user);
             assertRole(ctx.user, ["MANAGER", "ADMIN"]);
+
             const q: any = { isDeleted: false };
+
+            // Фильтр по статусу
             if (args.status) q.status = args.status;
-            if (args.unassignedOnly) q.managerId = { $exists: false };
+
+            // Фильтр "только неназначенные"
+            if (args.unassignedOnly) {
+                q.managerId = null;
+            }
+
+            if (ctx.user.role === "MANAGER") {
+                // MANAGER видит:
+                // - Если unassignedOnly=true: только неназначенные
+                // - Если unassignedOnly=false: неназначенные + свои назначенные
+                if (!args.unassignedOnly) {
+                    q.$or = [
+                        { managerId: null },
+                        { managerId: ctx.user.id }
+                    ];
+                }
+            }
+
+            // ADMIN видит всё (фильтры выше применяются)
+
             return ChatModel.find(q).sort({ lastMessageAt: -1, createdAt: -1 });
         },
 
@@ -129,14 +206,17 @@ export const resolvers = {
             const chat = await ChatModel.findOne({ _id: id, isDeleted: false });
             if (!chat) return null;
 
-            // доступ: клиент-владелец или назначенный менеджер/админ
             const customerId = (chat as any).customerId?.toString();
             const managerId = (chat as any).managerId?.toString();
 
+            // Доступ:
+            // - CLIENT: только свои чаты
+            // - MANAGER: неназначенные + свои назначенные
+            // - ADMIN: все чаты
             const ok =
                 ctx.user.role === "ADMIN" ||
                 customerId === ctx.user.id ||
-                (managerId && managerId === ctx.user.id);
+                (ctx.user.role === "MANAGER" && (!managerId || managerId === ctx.user.id));
 
             if (!ok) throw gqlError("FORBIDDEN", "No access to chat");
 
@@ -154,17 +234,23 @@ export const resolvers = {
             const ok =
                 ctx.user.role === "ADMIN" ||
                 customerId === ctx.user.id ||
-                (managerId && managerId === ctx.user.id);
+                (ctx.user.role === "MANAGER" && (!managerId || managerId === ctx.user.id));
 
             if (!ok) throw gqlError("FORBIDDEN", "No access to messages");
 
             return MessageModel.find({ chatId, isDeleted: false }).sort({ createdAt: 1 });
-        }
+        },
+
+        users: async (_: unknown, __: unknown, ctx: GqlContext) => {
+            assertAuth(ctx.user);
+            assertRole(ctx.user, ["ADMIN"]);
+            return UserModel.find({ isDeleted: false });
+        },
     },
 
     Mutation: {
-        register: async (_: unknown, args: any) => authService.register(args),
-        login: async (_: unknown, args: any) => authService.login(args),
+        register: async (_: unknown, { input }: { input: unknown }) => authService.register(input),
+        login: async (_: unknown, { input }: { input: unknown }) => authService.login(input),
 
         toggleFavorite: async (_: unknown, { carId }: { carId: string }, ctx: GqlContext) => {
             assertAuth(ctx.user);
@@ -177,10 +263,23 @@ export const resolvers = {
             const ids: string[] = (u as any).favoriteCarIds?.map((x: any) => x.toString()) ?? [];
             const exists = ids.includes(carId);
 
-            (u as any).favoriteCarIds = exists ? ids.filter(id => id !== carId) : [...ids, carId];
+            (u as any).favoriteCarIds = exists ? ids.filter((id) => id !== carId) : [...ids, carId];
             await u.save();
 
             return CarModel.find({ _id: { $in: (u as any).favoriteCarIds }, isDeleted: false });
+        },
+
+        setUserRole: async (_: unknown, { userId, role }: any, ctx: GqlContext) => {
+            assertAuth(ctx.user);
+            assertRole(ctx.user, ["ADMIN"]);
+
+            const user = await UserModel.findOne({ _id: userId, isDeleted: false });
+            if (!user) throw gqlError("NOT_FOUND", "User not found");
+
+            (user as any).role = role;
+            await user.save();
+
+            return user;
         },
 
         createCar: async (_: unknown, { input }: any, ctx: GqlContext) => {
@@ -195,11 +294,14 @@ export const resolvers = {
             return carService.updateCar(carId, input);
         },
 
-        createLead: async (_: unknown, args: any, ctx: GqlContext) => {
+        createLead: async (_: unknown, { input }: any, ctx: GqlContext) => {
             assertAuth(ctx.user);
-            const lead = await leadService.createLead({ ...args, customerId: ctx.user.id });
 
-            // notify managers/admins
+            const lead = await leadService.createLead({
+                ...input,
+                customerId: ctx.user.id,
+            });
+
             const managers = await UserModel.find({ role: { $in: ["MANAGER", "ADMIN"] }, isDeleted: false }).select("_id");
             for (const m of managers) {
                 pubsub.publish(TOPICS.NOTIFICATION, {
@@ -207,8 +309,8 @@ export const resolvers = {
                         userId: m._id.toString(),
                         title: "New lead",
                         message: "A customer created a request",
-                        createdAt: new Date().toISOString()
-                    }
+                        createdAt: new Date().toISOString(),
+                    },
                 });
             }
             return lead;
@@ -230,8 +332,8 @@ export const resolvers = {
                     userId: lead.customerId.toString(),
                     title: "Lead updated",
                     message: `Status changed to ${status}`,
-                    createdAt: new Date().toISOString()
-                }
+                    createdAt: new Date().toISOString(),
+                },
             });
 
             return lead;
@@ -254,7 +356,6 @@ export const resolvers = {
 
         createCarChat: async (_: unknown, { carId }: { carId: string }, ctx: GqlContext) => {
             assertAuth(ctx.user);
-            // клиент пишет только если авторизован
             return chatService.createCarChat(ctx.user.id, carId);
         },
 
@@ -275,6 +376,7 @@ export const resolvers = {
             return chatService.closeChat(chatId);
         },
 
+        // ✨ ИСПРАВЛЕНО: автоназначение при первом ответе
         sendMessage: async (_: unknown, { chatId, text }: any, ctx: GqlContext) => {
             assertAuth(ctx.user);
 
@@ -284,45 +386,62 @@ export const resolvers = {
             const customerId = (chat as any).customerId?.toString();
             const managerId = (chat as any).managerId?.toString();
 
-            // customer can write only to their chat
-            if (ctx.user.role === "CUSTOMER" && customerId !== ctx.user.id) {
+            // CLIENT может писать только в свои чаты
+            if (ctx.user.role === "CLIENT" && customerId !== ctx.user.id) {
                 throw gqlError("FORBIDDEN", "No access to chat");
             }
 
-            // manager can write only if assigned (admin always can)
-            if (ctx.user.role === "MANAGER" && managerId !== ctx.user.id) {
-                throw gqlError("FORBIDDEN", "Chat not assigned to you");
+            // MANAGER/ADMIN могут писать в неназначенные чаты или свои
+            if (ctx.user.role === "MANAGER") {
+                if (managerId && managerId !== ctx.user.id) {
+                    throw gqlError("FORBIDDEN", "Chat assigned to another manager");
+                }
+
+                // ✨ АВТОНАЗНАЧЕНИЕ: если чат неназначен и менеджер пишет — назначаем на него
+                if (!managerId) {
+                    (chat as any).managerId = ctx.user.id;
+                    await chat.save();
+
+                    // Уведомляем клиента
+                    pubsub.publish(TOPICS.NOTIFICATION, {
+                        notificationReceived: {
+                            userId: customerId,
+                            title: "Менеджер подключился",
+                            message: "С вами начали общение",
+                            createdAt: new Date().toISOString(),
+                        },
+                    });
+                }
             }
 
             return chatService.sendMessage({ chatId, authorId: ctx.user.id, text });
-        }
+        },
     },
-
 
     Subscription: {
         leadUpdated: {
             subscribe: withFilter(
                 () => pubsub.asyncIterableIterator([TOPICS.LEAD_UPDATED]),
                 (payload, variables) => payload.leadUpdated.customerId.toString() === variables.customerId
-            )
+            ),
         },
 
         messageAdded: {
             subscribe: withFilter(
                 () => pubsub.asyncIterableIterator([TOPICS.MESSAGE_ADDED]),
                 (payload, variables) => payload.messageAdded.chatId.toString() === variables.chatId
-            )
+            ),
         },
 
         notificationReceived: {
             subscribe: withFilter(
                 () => pubsub.asyncIterableIterator([TOPICS.NOTIFICATION]),
                 (payload, variables) => payload.notificationReceived.userId === variables.userId
-            )
+            ),
         },
 
         promotionPublished: {
-            subscribe: () => pubsub.asyncIterableIterator([TOPICS.PROMO_PUBLISHED])
-        }
-    }
+            subscribe: () => pubsub.asyncIterableIterator([TOPICS.PROMO_PUBLISHED]),
+        },
+    },
 };

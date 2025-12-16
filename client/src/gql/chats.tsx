@@ -1,44 +1,149 @@
 import { gql } from "@apollo/client";
 
 export const MY_CHATS = gql`
-  query MyChats {
-    myChats { id title lastMessageAt participants { id username role } inquiry { id } }
-  }
+    query MyChats {
+        myChats {
+            id
+            status
+            lastMessageAt
+            createdAt
+            updatedAt
+            car {
+                id
+            }
+            customer {
+                id
+                username
+                role
+            }
+            manager {
+                id
+                username
+                role
+            }
+            lastMessage {
+                id
+                text
+                kind
+                createdAt
+                author {
+                    id
+                    username
+                    role
+                }
+            }
+        }
+    }
 `;
 
 export const CHAT = gql`
-  query Chat($id: ID!) {
-    chat(id: $id) { id title participants { id username role } inquiry { id } }
-  }
+    query Chat($id: ID!) {
+        chat(id: $id) {
+            id
+            status
+            lastMessageAt
+            createdAt
+            updatedAt
+            car {
+                id
+            }
+            customer {
+                id
+                username
+                role
+            }
+            manager {
+                id
+                username
+                role
+            }
+            lastMessage {
+                id
+                text
+                kind
+                createdAt
+                author {
+                    id
+                    username
+                    role
+                }
+            }
+        }
+    }
 `;
 
 export const MESSAGES = gql`
-  query Messages($chatId: ID!, $limit: Int) {
-    messages(chatId: $chatId, limit: $limit) {
-      id text kind createdAt sender { id username role }
-      chat { id }
+    query ChatMessages($chatId: ID!) {
+        chatMessages(chatId: $chatId) {
+            id
+            text
+            kind
+            createdAt
+            updatedAt
+            author {
+                id
+                username
+                role
+            }
+            chat {
+                id
+            }
+        }
     }
-  }
 `;
 
-export const CREATE_CHAT = gql`
-  mutation CreateChat($input: CreateChatInput!) {
-    createChat(input: $input) { id }
-  }
+export const CREATE_CAR_CHAT = gql`
+    mutation CreateCarChat($carId: ID!) {
+        createCarChat(carId: $carId) {
+            id
+        }
+    }
+`;
+
+export const CREATE_SUPPORT_CHAT = gql`
+    mutation CreateSupportChat {
+        createSupportChat {
+            id
+        }
+    }
 `;
 
 export const SEND_MESSAGE = gql`
-  mutation SendMessage($input: SendMessageInput!) {
-    sendMessage(input: $input) {
-      id text createdAt sender { id username role } chat { id }
+    mutation SendMessage($chatId: ID!, $text: String!) {
+        sendMessage(chatId: $chatId, text: $text) {
+            id
+            text
+            kind
+            createdAt
+            updatedAt
+            author {
+                id
+                username
+                role
+            }
+            chat {
+                id
+            }
+        }
     }
-  }
 `;
 
 export const MESSAGE_ADDED = gql`
   subscription MessageAdded($chatId: ID!) {
     messageAdded(chatId: $chatId) {
-      id text createdAt sender { id username role } chat { id }
+      id
+      text
+      kind
+      createdAt
+      updatedAt
+      author {
+        id
+        username
+        role
+      }
+      chat {
+        id
+      }
     }
   }
 `;

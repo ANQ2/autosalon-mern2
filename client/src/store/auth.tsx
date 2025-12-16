@@ -6,35 +6,36 @@ import { persist } from "zustand/middleware";
 export type Role = "CLIENT" | "MANAGER" | "ADMIN";
 
 export type User = {
-  id: string;
-  email: string;
-  username: string;
-  role: Role;
+    id: string;
+    email: string;
+    username: string;
+    role: Role;
 };
 
 type AuthState = {
-  token: string | null;
-  user: User | null;
-  hydrated: boolean;
-  setAuth: (token: string, user: User) => void;
-  logout: () => void;
+    token: string | null;
+    user: User | null;
+    hydrated: boolean;
+    setAuth: (token: string, user: User) => void;
+    logout: () => void;
 };
 
 export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      token: null,
-      user: null,
-      hydrated: false,
-      setAuth: (token, user) => set({ token, user }),
-      logout: () => set({ token: null, user: null }),
-    }),
-    {
-      name: "autosalon-auth",
-      onRehydrateStorage: () => (state) => {
-        state?.hydrated && void 0; // no-op
-      },
-      
-    }
-  )
+    persist(
+        (set) => ({
+            token: null,
+            user: null,
+            hydrated: false,
+
+            setAuth: (token, user) => set({ token, user }),
+
+            logout: () => set({ token: null, user: null, hydrated: true }),
+        }),
+        {
+            name: "autosalon-auth",
+            onRehydrateStorage: () => (state) => {
+                state && (state.hydrated = true);
+            },
+        }
+    )
 );
