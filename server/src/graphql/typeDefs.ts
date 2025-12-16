@@ -1,21 +1,34 @@
-import { gql } from "graphql-tag";
-
-export const typeDefs = gql`
+export const typeDefs = /* GraphQL */ `
   scalar DateTime
 
-  enum Role { CUSTOMER MANAGER ADMIN }
-  enum CarStatus { AVAILABLE RESERVED SOLD }
-  enum LeadType { TEST_DRIVE RESERVE }
-  enum LeadStatus { NEW IN_PROGRESS APPOINTED DONE CANCELED }
-  enum ChatType { CAR SUPPORT }
+  """
+  Roles:
+  - CLIENT: покупатель/клиент
+  - MANAGER: менеджер автосалона
+  - ADMIN: главный менеджер (назначает роли)
+  """
+  enum Role { CLIENT MANAGER ADMIN }
+
+  enum Fuel { GAS DIESEL HYBRID EV }
+  enum Transmission { AT MT CVT }
+  enum Drive { FWD RWD AWD }
+
+  enum CarStatus { AVAILABLE RESERVED SOLD ARCHIVED }
+
+  enum LeadType { TEST_DRIVE RESERVE QUESTION }
+  enum LeadStatus { NEW IN_PROGRESS APPROVED REJECTED }
+
   enum ChatStatus { OPEN CLOSED }
+
+  enum MessageKind { TEXT SYSTEM }
 
   type User {
     id: ID!
     email: String!
+    username: String!
     role: Role!
-    fullName: String!
     phone: String
+    avatarUrl: String
     favorites: [Car!]!
     createdAt: DateTime!
     updatedAt: DateTime!
@@ -23,15 +36,18 @@ export const typeDefs = gql`
 
   type Car {
     id: ID!
-    title: String!
     brand: String!
     model: String!
     year: Int!
-    price: Int!
-    mileage: Int!
-    fuelType: String!
-    transmission: String!
+    price: Float!
+    mileage: Float!
+    color: String
+    fuel: Fuel!
+    transmission: Transmission!
+    drive: Drive!
     status: CarStatus!
+    vin: String
+    description: String
     images: [String!]!
     createdAt: DateTime!
     updatedAt: DateTime!
@@ -41,11 +57,12 @@ export const typeDefs = gql`
     id: ID!
     type: LeadType!
     status: LeadStatus!
+    message: String
+    preferredDate: DateTime
     customer: User!
     car: Car!
+    managerComment: String
     assignedManager: User
-    preferredDate: DateTime
-    comment: String
     createdAt: DateTime!
     updatedAt: DateTime!
   }
@@ -54,10 +71,8 @@ export const typeDefs = gql`
     id: ID!
     lead: Lead!
     manager: User!
-    dateTime: DateTime!
-    location: String!
+    scheduledAt: DateTime!
     note: String
-    status: String!
     createdAt: DateTime!
     updatedAt: DateTime!
   }
@@ -65,18 +80,17 @@ export const typeDefs = gql`
   type Promotion {
     id: ID!
     title: String!
-    description: String!
-    discountPercent: Int!
-    startsAt: DateTime!
-    endsAt: DateTime!
+    description: String
+    discountPercent: Int
     isActive: Boolean!
+    validFrom: DateTime
+    validTo: DateTime
     createdAt: DateTime!
     updatedAt: DateTime!
   }
 
   type Chat {
     id: ID!
-    type: ChatType!
     status: ChatStatus!
     car: Car
     customer: User!
@@ -92,13 +106,9 @@ export const typeDefs = gql`
     chat: Chat!
     author: User!
     text: String!
+    kind: MessageKind!
     createdAt: DateTime!
     updatedAt: DateTime!
-  }
-
-  type AuthPayload {
-    accessToken: String!
-    user: User!
   }
 
   type Notification {
@@ -108,55 +118,98 @@ export const typeDefs = gql`
     createdAt: DateTime!
   }
 
+  # ----------------- INPUTS -----------------
+
+  input RegisterInput {
+    email: String!
+    username: String!
+    password: String!
+    phone: String
+  }
+
+  input LoginInput {
+    email: String!
+    password: String!
+  }
+
+  input PaginationInput {
+    limit: Int = 20
+    offset: Int = 0
+  }
+
   input CarFilterInput {
     brand: String
-    minPrice: Int
-    maxPrice: Int
+    minPrice: Float
+    maxPrice: Float
+    fuel: Fuel
     status: CarStatus
     yearFrom: Int
     yearTo: Int
   }
 
-  input PaginationInput {
-    page: Int = 1
-    limit: Int = 12
-  }
-
   input CarCreateInput {
-    title: String!
     brand: String!
     model: String!
     year: Int!
-    price: Int!
-    mileage: Int!
-    fuelType: String!
-    transmission: String!
+    price: Float!
+    mileage: Float!
+    color: String
+    fuel: Fuel!
+    transmission: Transmission!
+    drive: Drive!
+    vin: String
+    description: String
     images: [String!]
   }
 
   input CarUpdateInput {
-    title: String
-    price: Int
-    mileage: Int
+    brand: String
+    model: String
+    year: Int
+    price: Float
+    mileage: Float
+    color: String
+    fuel: Fuel
+    transmission: Transmission
+    drive: Drive
     status: CarStatus
+    vin: String
+    description: String
     images: [String!]
   }
 
-  input PromotionCreateInput {
-    title: String!
-    description: String!
-    discountPercent: Int!
-    startsAt: DateTime!
-    endsAt: DateTime!
-    isActive: Boolean = true
+  input LeadCreateInput {
+    carId: ID!
+    type: LeadType!
+    message: String
+    preferredDate: DateTime
   }
 
   input AppointmentCreateInput {
     leadId: ID!
-    dateTime: DateTime!
-    location: String!
+    scheduledAt: DateTime!
     note: String
   }
+
+  input PromotionCreateInput {
+    title: String!
+    description: String
+    discountPercent: Int
+    isActive: Boolean = true
+    validFrom: DateTime
+    validTo: DateTime
+  }
+
+  input CarsCompareInput {
+    ids: [ID!]!
+  }
+
+  type AuthPayload {
+    token: String!
+    user: User!
+  }
+
+  # ----------------- QUERIES -----------------
 
   type Query {
     me: User
@@ -170,43 +223,46 @@ export const typeDefs = gql`
     myLeads: [Lead!]!
     crmLeads(status: LeadStatus, assignedManagerId: ID): [Lead!]!
 
-    promotions(activeOnly: Boolean = true): [Promotion!]!
+    promotions(activeOnly: Boolean = false): [Promotion!]!
 
-    # chats
     myChats: [Chat!]!
-    crmChats(status: ChatStatus, unassignedOnly: Boolean = false): [Chat!]!
+    crmChats(status: ChatStatus, unassignedOnly: Boolean): [Chat!]!
     chat(id: ID!): Chat
     chatMessages(chatId: ID!): [Message!]!
+
+    users: [User!]!
   }
 
+  # ----------------- MUTATIONS -----------------
+
   type Mutation {
-    register(email: String!, password: String!, fullName: String!, phone: String): AuthPayload!
-    login(email: String!, password: String!): AuthPayload!
+    register(input: RegisterInput!): AuthPayload!
+    login(input: LoginInput!): AuthPayload!
 
     toggleFavorite(carId: ID!): [Car!]!
 
-    # cars (only manager/admin)
+    setUserRole(userId: ID!, role: Role!): User!
+
     createCar(input: CarCreateInput!): Car!
     updateCar(carId: ID!, input: CarUpdateInput!): Car!
 
-    # leads (test drive / reserve)
-    createLead(type: LeadType!, carId: ID!, preferredDate: DateTime, comment: String): Lead!
-    assignLead(leadId: ID!, managerId: ID!): Lead!          # only ADMIN
-    updateLeadStatus(leadId: ID!, status: LeadStatus!): Lead! # manager/admin
+    createLead(input: LeadCreateInput!): Lead!
+    assignLead(leadId: ID!, managerId: ID!): Lead!
+    updateLeadStatus(leadId: ID!, status: LeadStatus!): Lead!
 
-    # appointment (manager/admin)
     createAppointment(input: AppointmentCreateInput!): Appointment!
 
-    # promotions (admin)
     createPromotion(input: PromotionCreateInput!): Promotion!
 
-    # chats
-    createCarChat(carId: ID!): Chat!     # customer only (auth)
-    createSupportChat(): Chat!           # customer only (auth)
-    assignChat(chatId: ID!, managerId: ID!): Chat!  # admin
-    closeChat(chatId: ID!): Chat!        # manager/admin
-    sendMessage(chatId: ID!, text: String!): Message! # auth; customer or assigned manager
+    createCarChat(carId: ID!): Chat!
+    createSupportChat: Chat!
+    assignChat(chatId: ID!, managerId: ID!): Chat!
+    closeChat(chatId: ID!): Chat!
+
+    sendMessage(chatId: ID!, text: String!): Message!
   }
+
+  # ----------------- SUBSCRIPTIONS -----------------
 
   type Subscription {
     leadUpdated(customerId: ID!): Lead!

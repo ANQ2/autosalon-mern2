@@ -1,26 +1,71 @@
 @import "tailwindcss";
 
+/* ---------- Base theme ---------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg0: 10 10 10;
+  --bg1: 17 17 17;
+  --fg: 237 237 237;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html, body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color: rgb(var(--fg));
+  background:
+    radial-gradient(1200px 700px at 20% -10%, rgba(59,130,246,0.22), transparent 60%),
+    radial-gradient(900px 600px at 90% 10%, rgba(168,85,247,0.18), transparent 55%),
+    radial-gradient(900px 700px at 50% 110%, rgba(34,197,94,0.10), transparent 55%),
+    rgb(var(--bg0));
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji",
+    "Segoe UI Emoji";
+}
+
+/* nicer selection */
+::selection {
+  background: rgba(255,255,255,0.14);
+}
+
+/* ---------- UI helpers ---------- */
+@layer components {
+  .page-wrap {
+    @apply min-h-screen;
+  }
+
+  .shell {
+    @apply mx-auto max-w-5xl px-4 py-10;
+  }
+
+  .card {
+    @apply rounded-2xl border border-neutral-800/80 bg-neutral-950/40 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur;
+  }
+
+  .card-muted {
+    @apply rounded-2xl border border-neutral-800/60 bg-neutral-950/20 p-4 text-sm text-neutral-300 backdrop-blur;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-neutral-800/80 bg-neutral-900/60 px-3 py-2 text-sm
+      text-neutral-100 outline-none placeholder:text-neutral-500
+      focus:border-neutral-700 focus:ring-2 focus:ring-white/10;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold
+      text-black transition hover:bg-neutral-200 active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center rounded-xl border border-neutral-800/80 px-4 py-2 text-sm
+      text-neutral-200 transition hover:bg-neutral-900/50 active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .link {
+    @apply underline underline-offset-4 text-neutral-300 hover:text-white;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full border border-neutral-800/80 bg-neutral-950/30 px-2.5 py-1 text-xs text-neutral-200;
+  }
 }
